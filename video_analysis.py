@@ -1,7 +1,7 @@
 import cv2
 from config import ANALYSIS_SAMPLE_RATE, BATCH_SIZE
 import numpy as np
-from clip_blip import generate_caption, clip_embedding_batch, cosine
+from blip_clip_2 import generate_caption, clip_embedding_batch, cosine
 
 
 def extract_and_analyze_video(path, sample_rate=ANALYSIS_SAMPLE_RATE):
@@ -94,5 +94,6 @@ def deduplicate_frames(scene_frames, all_embeddings, sim_threshold):
 
     if not selected:
         selected = [scene_frames[len(scene_frames) // 2][0]]
+
 
     return selected
