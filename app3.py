@@ -13,6 +13,26 @@ from gemini_ai import API_KEY, get_gemini_instructions as gemini_model
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="L&H AI Studio", layout="wide")
 
+# --- AUTO-RESET LOGIC ---
+# This ensures that every time the link is opened (new session), the data is wiped.
+if 'initialized' not in st.session_state:
+    for folder in [VIDEO_DIR, TEMP_DIR, OUTPUT_DIR]:
+        if os.path.exists(folder):
+            for filename in os.listdir(folder):
+                file_path = os.path.join(folder, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                except Exception:
+                    pass
+    if os.path.exists(ANALYSIS_JSON): os.remove(ANALYSIS_JSON)
+    if os.path.exists(FINAL_VIDEO): os.remove(FINAL_VIDEO)
+    
+    # Mark session as initialized so it doesn't loop reset on every click
+    st.session_state['initialized'] = True
+
 # --- CUSTOM STYLING ---
 st.markdown("""
     <style>
@@ -30,7 +50,6 @@ st.markdown("""
         background: #000;
         margin-bottom: 20px;
     }
-    /* Optional: Force a max-width on all videos globally */
     video {
         max-width: 100%;
         border-radius: 8px;
@@ -38,35 +57,11 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-
-# --- FEATURE: CLEAR CACHE & DATA ---
-def clear_all_data():
-    st.cache_data.clear()
-    st.cache_resource.clear()
-    for folder in [VIDEO_DIR, TEMP_DIR, OUTPUT_DIR]:
-        if os.path.exists(folder):
-            for filename in os.listdir(folder):
-                file_path = os.path.join(folder, filename)
-                try:
-                    if os.path.isfile(file_path) or os.path.islink(file_path):
-                        os.unlink(file_path)
-                    elif os.path.isdir(file_path):
-                        shutil.rmtree(file_path)
-                except Exception as e:
-                    st.error(f"Error deleting {filename}: {e}")
-    if os.path.exists(ANALYSIS_JSON): os.remove(ANALYSIS_JSON)
-    if os.path.exists(FINAL_VIDEO): os.remove(FINAL_VIDEO)
-    st.success("System Reset Successful!")
-    time.sleep(1)
-    st.rerun()
-
-
 def get_video_binary(path):
     if os.path.exists(path):
         with open(path, "rb") as f:
             return f.read()
     return None
-
 
 def main():
     if os.path.exists("l&h_logo.png"):
@@ -101,9 +96,7 @@ def main():
         if st.button("Generate Base Video", use_container_width=True):
             run_generation_flow(style_name, use_semantic, enable_ai_selection, selection_query)
 
-        st.divider()
-        if st.button("🗑️ Clear Cache & Reset System", use_container_width=True):
-            clear_all_data()
+        # MANUAL RESET BUTTON REMOVED AS PER INSTRUCTIONS
 
     if os.path.exists(FINAL_VIDEO):
         col_preview, col_panel = st.columns([2, 1])
@@ -112,8 +105,6 @@ def main():
             st.subheader("Preview Draft")
             video_data = get_video_binary(FINAL_VIDEO)
             if video_data:
-                # --- EVEN SMALLER PREVIEW SIZE ---
-                # Ratio [0.3, 0.4, 0.3] makes the center column only 40% of the width
                 v_spacer_l, v_main, v_spacer_r = st.columns([0.3, 0.4, 0.3])
                 with v_main:
                     st.markdown('<div class="video-card">', unsafe_allow_html=True)
@@ -138,8 +129,7 @@ def main():
     else:
         st.info("System Ready. Please upload clips and generate the base video to begin.")
 
-
-# --- UPDATED FLOW LOGIC ---
+# --- FLOW LOGIC ---
 
 def run_generation_flow(style_name, use_semantic, enable_ai_selection, selection_query):
     with st.status("🎬 Processing internal files...", expanded=True) as status:
@@ -188,7 +178,6 @@ def run_generation_flow(style_name, use_semantic, enable_ai_selection, selection
         time.sleep(1)
         st.rerun()
 
-
 def run_ai_flow(prompt):
     with st.spinner("Applying AI instructions..."):
         all_analysis = []
@@ -201,7 +190,6 @@ def run_ai_flow(prompt):
         if os.path.exists(ai_output):
             shutil.move(ai_output, FINAL_VIDEO)
             st.rerun()
-
 
 if __name__ == "__main__":
     os.makedirs(VIDEO_DIR, exist_ok=True)
