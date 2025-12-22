@@ -4,7 +4,7 @@ import os
 import shutil
 import subprocess
 import time
-from clip_blip import cosine
+from blip_clip_2 import cosine
 from video_analysis import segment_scenes, deduplicate_frames
 from config import FINAL_FPS, LOGO_PATH
 from filters import apply_filter
@@ -181,4 +181,5 @@ def semantic_order(clips):
                 best_sim = sim
                 best_idx = i
         ordered.append(clips.pop(best_idx))
+
     return ordered
