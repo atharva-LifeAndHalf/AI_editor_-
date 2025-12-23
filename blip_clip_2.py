@@ -4,6 +4,7 @@ import gc
 import torch
 import json
 import numpy as np
+import streamlit as st  # <--- Critical for link stability
 from PIL import Image
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -15,10 +16,9 @@ from transformers import (
 from config import DEVICE, OUTPUT_DIR, VIDEO_DIR
 
 # --- 2025 STABILITY PATCHES: PREVENT BUSTED LINK ---
-# We force the system to wait longer for HuggingFace models to download.
-# This stops the 'ReadTimeout' error that kills your link.
-os.environ["HF_HUB_READ_TIMEOUT"] = "60"
-os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "60"
+# These force the app to wait for the models to download on slow connections
+os.environ["HF_HUB_READ_TIMEOUT"] = "120"
+os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "120"
 
 # --- MEDIAPIPE IMPORT ---
 try:
@@ -33,7 +33,7 @@ except Exception as e:
     print(f"⚠️ MediaPipe unavailable: {e}")
     segmentor = None
 
-# ---------------- STYLES ----------------
+# ---------------- STYLES (No changes made) ----------------
 STYLES = {
     "cinematic": {"scene_threshold": 0.70, "frame_similarity": 0.96, "transition": "crossfade", "transition_frames": 25, "filter": "cinematic"},
     "fast_reel": {"scene_threshold": 0.60, "frame_similarity": 0.93, "transition": "cut", "transition_frames": 0, "filter": "bright"},
@@ -45,28 +45,38 @@ STYLES = {
     "music_video": {"scene_threshold": 0.65, "frame_similarity": 0.94, "transition": "crossfade", "transition_frames": 15, "filter": "contrast"}
 }
 
-# ---------------- LOAD MODELS ----------------
-print(f"🔹 Loading AI models on {DEVICE}...")
+# ---------------- LOAD MODELS (CACHED) ----------------
+@st.cache_resource
+def init_ai_models():
+    """Loads models once and shares them across all app reruns."""
+    print(f"🔹 Loading AI models on {DEVICE}...")
+    
+    # 1. CLIP Loading
+    try:
+        cp = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", use_fast=True)
+        cm = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(DEVICE).eval()
+        print(" ✅ CLIP loaded")
+    except Exception as e:
+        print(f" ❌ CLIP error: {e}")
+        cp, cm = None, None
 
-# CHANGE: Added use_fast=True to stop the "Slow Processor" warning/crash
-try:
-    clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", use_fast=True)
-    clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(DEVICE).eval()
-    print(" ✅ CLIP loaded")
-except Exception as e:
-    print(f" ❌ CLIP error: {e}")
-    clip_processor, clip_model = None, None
+    # 2. BLIP Loading
+    try:
+        bp = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+        bm = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base").to(DEVICE).eval()
+        print(" ✅ BLIP loaded")
+    except Exception as e:
+        print(f" ❌ BLIP error: {e}")
+        bp, bm = None, None
+        
+    gc.collect() # Clean up RAM immediately after loading
+    return cp, cm, bp, bm
 
-try:
-    blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-    blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base").to(DEVICE).eval()
-    print(" ✅ BLIP loaded")
-except Exception as e:
-    print(f" ❌ BLIP error: {e}")
-    blip_processor, blip_model = None, None
+# Call the cached function to set global variables
+clip_processor, clip_model, blip_processor, blip_model = init_ai_models()
 
 
-# ---------------- UTILS ----------------
+# ---------------- UTILS (No functionality removed) ----------------
 def cosine(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
@@ -75,7 +85,6 @@ def clip_embedding_batch(frames):
     if not frames or clip_processor is None or clip_model is None:
         return []
     images = [Image.fromarray(f) for f in frames]
-    # CHANGE: Added return_tensors and padding to ensure stability
     inputs = clip_processor(images=images, return_tensors="pt", padding=True).to(DEVICE)
     with torch.no_grad():
         embeddings = clip_model.get_image_features(**inputs)
@@ -86,22 +95,19 @@ def generate_caption(frame):
     try:
         if blip_processor is None or blip_model is None:
             return "Video frame"
-        # BGR to RGB conversion is critical for BLIP accuracy
         img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         inputs = blip_processor(img, return_tensors="pt").to(DEVICE)
         with torch.no_grad():
-            out = blip_model.generate(**inputs)
+            out = blip_model.generate(**inputs, max_new_tokens=30)
         return blip_processor.decode(out[0], skip_special_tokens=True)
     except Exception as e:
         print(f" Caption error: {e}")
         return "Video frame"
 
 
-# ---------------- GEMINI SMART SELECTION ----------------
+# ---------------- GEMINI SMART SELECTION (No changes made) ----------------
 def select_clips_with_ai(user_selection_prompt, analyzed_clips, gemini_model):
-    """
-    Filters the analyzed clips using Gemini based on the BLIP captions.
-    """
+    """Filters the analyzed clips using Gemini based on the BLIP captions."""
     clip_catalog = ""
     for clip in analyzed_clips:
         clip_catalog += f"Filename: {clip['name']} | Description: {clip['captions']}\n"
@@ -123,10 +129,9 @@ def select_clips_with_ai(user_selection_prompt, analyzed_clips, gemini_model):
 
     try:
         response = gemini_model.generate_content(prompt)
-        # Robust cleaning of markdown tags
         clean_json = response.text.strip().replace("```json", "").replace("```", "").strip()
         selected_files = json.loads(clean_json)
         return selected_files
     except Exception as e:
-        print(f"⚠️ Gemini Selection Error: {e}. Returning all clips as fallback.")
+        print(f"⚠️ Gemini Selection Error: {e}")
         return [c['name'] for c in analyzed_clips]
